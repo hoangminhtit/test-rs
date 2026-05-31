@@ -1,56 +1,73 @@
 """
-Create book embeddings from books catalog and write to Delta table book_embeddings.
+Create book embeddings from Gold Layer dim_books → Delta book_embeddings.
+
+Plan input: book_id, title, author, category_name, seller_username, price, rating_avg, purchase_count
 """
 
 from sentence_transformers import SentenceTransformer
 
 from config.databricks_config import (
     BOOK_EMBEDDINGS_TABLE,
-    BOOKS_TABLE,
+    DIM_BOOKS_TABLE,
+    ensure_output_schema,
     get_spark,
-    table_path,
+    gold_table_path,
+    output_table_path,
 )
 
 EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 
 
-def build_book_text(title: str, author: str, category: str, description: str) -> str:
+def build_book_text(
+    title: str,
+    author: str,
+    category_name: str,
+    seller_username: str,
+    price,
+    rating_avg,
+    purchase_count,
+) -> str:
+    """Text construction per plan section 5."""
     return f"""
 Title: {title}
 Author: {author}
-Category: {category}
-Description: {description}
+Category: {category_name}
+Seller: {seller_username}
+Price: {price}
+Rating: {rating_avg}
+Purchase count: {purchase_count}
 """.strip()
 
 
-def create_book_embeddings():
+def create_book_embeddings() -> int:
     spark = get_spark()
-    books_df = spark.table(table_path(BOOKS_TABLE))
-
+    ensure_output_schema(spark)
+    books_df = spark.table(gold_table_path(DIM_BOOKS_TABLE))
     model = SentenceTransformer(EMBEDDING_MODEL)
-    rows = books_df.collect()
 
     records = []
-    for row in rows:
+    for row in books_df.collect():
         text = build_book_text(
-            row.title, row.author, row.category, row.description
+            title=row.title,
+            author=row.author,
+            category_name=row.category_name,
+            seller_username=row.seller_username,
+            price=row.price,
+            rating_avg=row.rating_avg,
+            purchase_count=row.purchase_count,
         )
-        embedding = model.encode(text).tolist()
-        records.append((row.book_id, embedding))
+        records.append((int(row.book_id), model.encode(text).tolist()))
 
     result_df = spark.createDataFrame(
-        records, schema="book_id long, embedding array<float>"
+        records, schema="book_id int, embedding array<float>"
     )
-
     (
         result_df.write.format("delta")
         .mode("overwrite")
-        .saveAsTable(table_path(BOOK_EMBEDDINGS_TABLE))
+        .saveAsTable(output_table_path(BOOK_EMBEDDINGS_TABLE))
     )
-
     return result_df.count()
 
 
 if __name__ == "__main__":
-    count = create_book_embeddings()
-    print(f"Created embeddings for {count} books.")
+    print(f"Created embeddings for {create_book_embeddings()} books.")

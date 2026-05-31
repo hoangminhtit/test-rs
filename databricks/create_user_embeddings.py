@@ -8,8 +8,9 @@ from config.databricks_config import (
     BOOK_EMBEDDINGS_TABLE,
     USER_BOOK_WEIGHTS_TABLE,
     USER_EMBEDDINGS_TABLE,
+    ensure_output_schema,
     get_spark,
-    table_path,
+    output_table_path,
 )
 
 
@@ -25,8 +26,9 @@ def weighted_average(embeddings, weights):
 
 def create_user_embeddings():
     spark = get_spark()
-    weights_df = spark.table(table_path(USER_BOOK_WEIGHTS_TABLE))
-    books_df = spark.table(table_path(BOOK_EMBEDDINGS_TABLE))
+    ensure_output_schema(spark)
+    weights_df = spark.table(output_table_path(USER_BOOK_WEIGHTS_TABLE))
+    books_df = spark.table(output_table_path(BOOK_EMBEDDINGS_TABLE))
 
     joined_df = weights_df.join(books_df, on="book_id", how="inner")
     rows = joined_df.collect()
@@ -45,12 +47,12 @@ def create_user_embeddings():
         if embedding is not None:
             records.append((user_id, embedding.tolist()))
 
-    result_df = spark.createDataFrame(records, schema="user_id string, embedding array<float>")
+    result_df = spark.createDataFrame(records, schema="user_id int, embedding array<float>")
 
     (
         result_df.write.format("delta")
         .mode("overwrite")
-        .saveAsTable(table_path(USER_EMBEDDINGS_TABLE))
+        .saveAsTable(output_table_path(USER_EMBEDDINGS_TABLE))
     )
 
     return result_df.count()

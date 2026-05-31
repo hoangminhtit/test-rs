@@ -8,7 +8,7 @@ router = APIRouter()
 
 
 @router.get("/recommend/{user_id}")
-def recommend(user_id: str, top_k: int | None = Query(default=None, ge=1, le=100)):
+def recommend(user_id: int, top_k: int | None = Query(default=None, ge=1, le=100)):
     try:
         return get_recommendations(user_id, top_k=top_k)
     except Exception as exc:

@@ -1,73 +1,58 @@
-# Báo cáo triển khai — Book Recommendation System
+# Báo cáo — Book Recommendation System
 
-**Ngày:** 31/05/2026  
-**Tham chiếu:** `plan (1).md`
-
----
-
-## 1. Review plan
-
-Plan mô tả rõ kiến trúc **Content-Based Filtering**: Databricks xử lý và ghi vector lên Qdrant; FastAPI chỉ đọc Qdrant để khuyến nghị. Luồng 4 bước (book embedding → user weight → user embedding → sync Qdrant) và API `GET /recommend/{user_id}` phù hợp để triển khai theo module.
+**Cập nhật theo:** `plan (1).md` (Gold Layer schema đầy đủ)
 
 ---
 
-## 2. Đã hoàn thành
+## Đã viết lại theo plan
 
-### Databricks layer (`databricks/`)
+### Databricks
 
-| File | Nội dung |
-|------|----------|
-| `config/databricks_config.py` | Biến môi trường Databricks, Spark session, tên Delta tables |
-| `config/qdrant_config.py` | URL/API key Qdrant, tên collection |
-| `create_book_embeddings.py` | Ghép text sách → `SentenceTransformer(paraphrase-multilingual-MiniLM-L12-v2)` → Delta `book_embeddings` |
-| `create_user_weight_matrix.py` | Map action (view/click/wishlist/cart/purchase) → weight, group by user/book → Delta `user_book_weights` |
-| `create_user_embeddings.py` | Weighted average embedding sách theo công thức trong plan → Delta `user_embeddings` |
-| `storage_qdrant.py` | `upsert` vào `book_embeddings` và `user_embeddings` trên Qdrant (payload đúng plan) |
-| `recommendation_job.py` | Orchestrator chạy lần lượt 4 bước |
-| `utils.py` | Chuyển `book_id` / `user_id` sang ID tương thích Qdrant |
-| `requirements.txt` | pyspark, delta-spark, sentence-transformers, qdrant-client |
+| Module | Khớp plan |
+|--------|-----------|
+| `create_book_embeddings.py` | Input `dim_books`; text đúng mẫu section 5; output `book_id \| embedding` |
+| `create_user_weight_matrix.py` | `fact_cart` + `fact_sales` only; **bỏ `fact_reviews`**; ACTION_WEIGHTS; groupBy sum(weight) |
+| `create_user_embeddings.py` | Weighted average; output `user_id \| embedding` |
+| `storage_books_qdrant.py` / `storage_users_qdrant.py` | Batch upsert; payload sách có `book_id` |
+| `recommendation_job.py` | 4 bước tuần tự |
+| `databricks_config.py` | Spark session cho Databricks cluster + Connect |
 
-### FastAPI layer (`fastapi/`)
+### FastAPI
 
-| File | Nội dung |
-|------|----------|
-| `config/qdrant_config.py` | Cấu hình Qdrant + `TOP_K=20` |
-| `connect_qdrant.py` | Singleton `QdrantClient` |
-| `recommend_service.py` | `retrieve` user vector → `search` book collection → Top-K |
-| `routes.py` | `GET /recommend/{user_id}` (+ query `top_k`) |
-| `main.py` | FastAPI app + `/health` |
-| `requirements.txt` | fastapi, uvicorn, qdrant-client |
+| Module | Khớp plan |
+|--------|-----------|
+| `recommend_service.py` | retrieve user → search books → Top-K; response `{book_id, score}` |
+| `routes.py` | `GET /recommend/{user_id}` |
 
-### Khác
+### Schema `fact_reviews`
 
-- `README.md` — hướng dẫn cài đặt và chạy
-- `.env.example` — mẫu biến môi trường
+Chỉ còn: `book_id`, `score`, `total_reviews_at_snapshot`, `snapshot_date` — không map được `user_id`, nên pipeline **không đọc** bảng này (đúng ghi chú plan).
 
 ---
 
-## 3. Cách chạy (tóm tắt)
+## Chạy trên Databricks
 
-1. Tạo Delta tables `books`, `user_behaviors` trên Databricks.
-2. Cấu hình `.env` (Databricks + Qdrant).
-3. `cd databricks && python recommendation_job.py`
-4. `cd fastapi && uvicorn main:app --reload`
-5. Gọi `GET /recommend/U001`
+1. Sync repo lên Workspace.
+2. Job/notebook gắn **cluster Spark**.
+3. `python recommendation_job.py` hoặc từng file riêng.
 
 ---
 
-## 4. Lưu ý vận hành
+## Unity Catalog — foreign catalog
 
-- Pipeline cần **Spark + Delta** (Databricks hoặc local có delta-spark).
-- Lần đầu chạy model Sentence Transformer sẽ tải weights (~400MB).
-- Schedule 1 giờ: cấu hình trên **Databricks Jobs UI**, không hard-code trong repo.
-- `user_id` dạng chuỗi (vd. `U001`) được map sang UUID ổn định để dùng làm point ID trên Qdrant (cùng logic ở Databricks sync và FastAPI retrieve).
+- **Đọc:** `ecommerce_analyst_agent_catalog.gold.*`
+- **Ghi:** `main.recommender.*` (mặc định) — **không** dùng foreign catalog làm `DATABRICKS_OUTPUT_CATALOG_NAME`
 
 ---
 
-## 5. Chưa làm trong phạm vi code
+## Qdrant sync (tách pipeline + batch)
 
-- Dữ liệu mẫu / notebook khởi tạo bảng Delta
-- Unit test tự động
-- Deploy production (Docker, CI/CD)
+- `storage_books_qdrant.py` / `storage_users_qdrant.py` — không dùng `.collect()`
+- Upsert theo batch (`QDRANT_BATCH_SIZE=1000`, `toLocalIterator()`)
+- Payload sách có thêm `book_id` để debug
 
-Các phần trên có thể bổ sung khi có cluster Databricks và Qdrant Cloud thực tế.
+---
+
+## Lưu ý Qdrant
+
+Point ID = `book_id` / `user_id` (integer). Re-run `storage_books_qdrant` / `storage_users_qdrant` sau khi đổi embedding hoặc ID scheme.

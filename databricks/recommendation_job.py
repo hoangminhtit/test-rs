@@ -1,40 +1,60 @@
 """
-Master Databricks workflow — runs the full recommendation pipeline in order.
-Schedule: every 1 hour (configure in Databricks Jobs UI).
+Databricks workflows — two pipelines (can run as separate Jobs).
+
+Pipeline 1 (books):
+  create_book_embeddings → storage_books_qdrant
+
+Pipeline 2 (users):
+  create_user_weight_matrix → create_user_embeddings → storage_users_qdrant
+
+Full run: both pipelines in sequence.
 """
 
 from create_book_embeddings import create_book_embeddings
 from create_user_embeddings import create_user_embeddings
 from create_user_weight_matrix import create_user_weight_matrix
-from storage_qdrant import storage_qdrant
+from storage_books_qdrant import storage_books_qdrant
+from storage_users_qdrant import storage_users_qdrant
 
 
-def run_recommendation_pipeline():
-    """Step 1 → 2 → 3 → 4 as defined in the project plan."""
-    print("Step 1: create_book_embeddings")
+def run_books_pipeline() -> dict:
+    print("Pipeline 1: create_book_embeddings")
     book_count = create_book_embeddings()
     print(f"  → {book_count} book embeddings")
 
-    print("Step 2: create_user_weight_matrix")
+    print("Pipeline 1: storage_books_qdrant")
+    qdrant_books = storage_books_qdrant()
+    print(f"  → {qdrant_books} books in Qdrant")
+
+    return {"book_embeddings": book_count, "qdrant_books": qdrant_books}
+
+
+def run_users_pipeline() -> dict:
+    print("Pipeline 2: create_user_weight_matrix")
     weight_count = create_user_weight_matrix()
     print(f"  → {weight_count} user-book weights")
 
-    print("Step 3: create_user_embeddings")
+    print("Pipeline 2: create_user_embeddings")
     user_count = create_user_embeddings()
     print(f"  → {user_count} user embeddings")
 
-    print("Step 4: storage_qdrant")
-    sync_result = storage_qdrant()
-    print(f"  → synced: {sync_result}")
+    print("Pipeline 2: storage_users_qdrant")
+    qdrant_users = storage_users_qdrant()
+    print(f"  → {qdrant_users} users in Qdrant")
 
     return {
-        "book_embeddings": book_count,
         "user_book_weights": weight_count,
         "user_embeddings": user_count,
-        "qdrant_sync": sync_result,
+        "qdrant_users": qdrant_users,
     }
 
 
+def run_recommendation_pipeline() -> dict:
+    """Run both pipelines (full refresh)."""
+    books = run_books_pipeline()
+    users = run_users_pipeline()
+    return {**books, **users}
+
+
 if __name__ == "__main__":
-    summary = run_recommendation_pipeline()
-    print("Pipeline completed:", summary)
+    print("Pipeline completed:", run_recommendation_pipeline())

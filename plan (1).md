@@ -22,6 +22,106 @@ Xây dựng hệ thống khuyến nghị sách theo phương pháp **Content-Bas
 
 ---
 
+---
+# Gold Layer Database Schema
+
+## dim_books
+
+Book dimension table containing metadata for each book.
+
+| Column | Type |
+|---|---|
+| author | string |
+| book_id | int |
+| category_name | string |
+| price | double |
+| purchase_count | int |
+| rating_avg | double |
+| seller_username | string |
+| title | string |
+
+---
+
+## dim_date
+
+Date dimension table.
+
+| Column | Type |
+|---|---|
+| date | date |
+| year | int |
+| month | int |
+| day | int |
+| day_of_week | string |
+| quarter | int |
+| is_weekend | boolean |
+
+---
+
+## dim_users
+
+User dimension table.
+
+| Column | Type |
+|---|---|
+| user_id | int |
+| username | string |
+| full_name | string |
+| email | string |
+| role | string |
+| is_active | boolean |
+
+---
+
+## fact_cart
+
+Cart interaction fact table.
+
+| Column | Type |
+|---|---|
+| cart_id | int |
+| buyer_id | int |
+| book_id | int |
+| quantity | int |
+| added_at | timestamp |
+
+---
+
+## fact_reviews
+
+Book review snapshot table.
+
+| Column | Type |
+|---|---|
+| book_id | int |
+| score | double |
+| total_reviews_at_snapshot | int |
+| snapshot_date | timestamp |
+
+---
+
+## fact_sales
+
+Sales transaction fact table.
+
+| Column | Type |
+|---|---|
+| order_item_id | int |
+| order_id | int |
+| buyer_id | int |
+| seller_id | int |
+| book_id | int |
+| order_date | timestamp |
+| quantity | int |
+| unit_price | double |
+| line_total | double |
+| order_overall_status | string |
+| item_status | string |
+| payment_method | string |
+| payment_status | string |
+
+---
+
 ## 2. Project Architecture
 
 ```
@@ -120,7 +220,7 @@ Tạo embedding cho sách.
 
 **Input — Books Table:**
 ```
-book_id | title | author | category | description
+book_id | title | author | category_name | seller_username | price | rating_avg | purchase_count
 ```
 
 **Text Construction:**
@@ -128,8 +228,11 @@ book_id | title | author | category | description
 text = f"""
 Title: {title}
 Author: {author}
-Category: {category}
-Description: {description}
+Category: {category_name}
+Seller: {seller_username}
+Price: {price}
+Rating: {rating_avg}
+Purchase count: {purchase_count}
 """
 ```
 
@@ -166,6 +269,8 @@ user_id | book_id | action | timestamp
 ```
 
 **Aggregation:** Group by `(user_id, book_id)` → `sum(weight)`
+
+**Note:** `fact_reviews` trong catalog hiện tại không có `buyer_id`, nên mặc định bị bỏ qua khi tính user behaviors.
 
 **Output → Delta Table `user_book_weights`:**
 ```

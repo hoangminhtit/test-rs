@@ -1,84 +1,77 @@
 # Book Recommendation System
 
-Hệ thống khuyến nghị sách **Content-Based Filtering** với Databricks, Sentence Transformer, Qdrant và FastAPI.
+Content-Based Filtering — **Databricks** + **Sentence Transformer** + **Qdrant** + **FastAPI**.
 
-## Kiến trúc
+## Unity Catalog
 
-- **Databricks**: xử lý dữ liệu, tạo embedding sách/người dùng, đồng bộ lên Qdrant
-- **FastAPI**: chỉ đọc vector từ Qdrant và trả về Top-K sách tương tự
+| Vị trí | Vai trò |
+|--------|---------|
+| `ecommerce_analyst_agent_catalog.gold` | **Chỉ đọc** (CATALOG_FOREIGN + SCHEMA_FOREIGN) |
+| `main.recommender` (mặc định) | **Ghi** pipeline outputs |
 
-## Cấu trúc thư mục
+**Không** tạo schema/bảng trong `ecommerce_analyst_agent_catalog` — catalog này là foreign.
 
+Trên Databricks Job, set biến môi trường:
+
+```bash
+DATABRICKS_OUTPUT_CATALOG_NAME=main
+DATABRICKS_OUTPUT_SCHEMA_NAME=recommender
 ```
-recommender-service/
-├── databricks/          # Pipeline xử lý & đồng bộ Qdrant
-├── fastapi/             # API khuyến nghị
-├── .env.example
-└── README.md
+
+Tạo schema ghi (catalog **writable** của workspace bạn, thường là `main`):
+
+```sql
+CREATE SCHEMA IF NOT EXISTS main.recommender;
 ```
 
-## Cài đặt
+Bảng output: `main.recommender.book_embeddings`, `user_book_weights`, `user_embeddings`.
 
-### Databricks
+| Bảng Gold | Pipeline |
+|-----------|----------|
+| `dim_books` | → book embeddings |
+| `fact_cart`, `fact_sales` | → user weights |
+| `fact_reviews` | Không dùng (không có `buyer_id`) |
+
+## Pipeline Databricks
 
 ```bash
 cd databricks
 pip install -r requirements.txt
-cp ../.env.example ../.env   # điền biến môi trường
-```
-
-Chạy toàn bộ pipeline:
-
-```bash
 python recommendation_job.py
 ```
 
-Hoặc từng bước:
+**Pipeline 1 (sách):** `create_book_embeddings` → `storage_books_qdrant`
 
-```bash
-python create_book_embeddings.py
-python create_user_weight_matrix.py
-python create_user_embeddings.py
-python storage_qdrant.py
-```
+**Pipeline 2 (user):** `create_user_weight_matrix` → `create_user_embeddings` → `storage_users_qdrant`
 
-**Lịch Job trên Databricks:** tạo Workflow với 4 task theo thứ tự trên, schedule mỗi 1 giờ.
+**Full:** `python recommendation_job.py` (cả hai pipeline)
 
-### FastAPI
+Qdrant sync dùng `toLocalIterator()` + batch 1000 (tránh OOM driver khi catalog lớn).
+
+## FastAPI
 
 ```bash
 cd fastapi
 pip install -r requirements.txt
-export QDRANT_URL=...
-export QDRANT_API_KEY=...
 uvicorn main:app --reload
 ```
 
-## API
-
-| Method | Endpoint | Mô tả |
-|--------|----------|--------|
-| GET | `/health` | Health check |
-| GET | `/recommend/{user_id}` | Top-K sách gợi ý (mặc định K=20) |
-| GET | `/recommend/{user_id}?top_k=10` | Tùy chỉnh số lượng |
-
-Ví dụ:
-
 ```http
-GET http://localhost:8000/recommend/U001
+GET /recommend/42
+GET /recommend/42?top_k=10
 ```
 
-## Delta Tables (Databricks)
+Response (theo plan):
 
-| Bảng | Cột chính |
-|------|-----------|
-| `books` | book_id, title, author, category, description |
-| `user_behaviors` | user_id, book_id, action, timestamp |
-| `book_embeddings` | book_id, embedding |
-| `user_book_weights` | user_id, book_id, weight |
-| `user_embeddings` | user_id, embedding |
+```json
+{
+  "user_id": 42,
+  "recommendations": [
+    { "book_id": 101, "score": 0.96 }
+  ]
+}
+```
 
-## Qdrant Collections
+## Cấu hình
 
-- `book_embeddings` — vector sách + payload (title, author, category)
-- `user_embeddings` — vector người dùng + payload (user_id)
+Copy `.env.example` → `.env` (Databricks + Qdrant).
