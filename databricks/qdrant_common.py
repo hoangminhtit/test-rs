@@ -10,7 +10,11 @@ from config.qdrant_config import QDRANT_API_KEY, QDRANT_BATCH_SIZE, QDRANT_URL, 
 
 
 def get_qdrant_client() -> QdrantClient:
-    return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY or None)
+    return QdrantClient(
+        url=QDRANT_URL, 
+        api_key=QDRANT_API_KEY,
+        prefer_grpc=False
+    )
 
 
 def ensure_collection(client: QdrantClient, collection_name: str) -> None:

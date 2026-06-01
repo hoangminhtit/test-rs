@@ -17,6 +17,7 @@ from config.qdrant_config import BOOK_COLLECTION
 from qdrant_common import ensure_collection, get_qdrant_client, upsert_rows_in_batches
 from utils import to_qdrant_point_id
 
+from config.qdrant_config import *
 
 def _book_point(row) -> PointStruct:
     return PointStruct(
